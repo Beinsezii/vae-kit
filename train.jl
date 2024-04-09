@@ -63,19 +63,18 @@ function oklab_to_srgb(arr::AbstractArray{Float32})::Array{Float32}
 end
 # }}}
 
-function silu_fast(n)
-    return n * (n / (1 + abs(n)))
-end
-
 function train(network, source::AbstractArray, dest::AbstractArray; epochs::Int64=1000, rate::Float64=0.001)::Vector
     optim = Flux.setup(AdamW(rate), network)
     meter = Progress(epochs, dt=0.5, showspeed=true)
     losses = []
-    for epoch in 1:epochs
+    for _ in 1:epochs
         loss, grads = Flux.withgradient(m -> mean(abs.(m(source) .- dest)), network)
+        if !isfinite(loss)
+            break
+        end
         Flux.update!(optim, network, grads[1])
-        next!(meter, showvalues=[(:loss, loss)])
         push!(losses, loss)
+        next!(meter, showvalues=[(:loss, loss)])
     end
     return losses
 end
@@ -95,8 +94,8 @@ end
     dtype = f32
 
     network = Flux.Chain(
-                  Flux.Dense(4 => 4, silu_fast),
-                  Flux.Dense(4 => 3),
+                  Flux.Dense(4 => 4, swish),
+                  Flux.Dense(4 => 3, x -> x),
               ) |> device |> dtype
 
     trim = 5
@@ -107,7 +106,7 @@ end
         network,
         permutedims(latent_dist, (3, 2, 1)) |> device |> dtype,
         permutedims(colors, (2, 1)) |> device |> dtype;
-        epochs=500_000,
+        epochs=200_000,
         rate=2e-3
     )
 
