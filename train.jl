@@ -63,11 +63,13 @@ function oklab_to_srgb(arr::AbstractArray{Float32})::Array{Float32}
 end
 # }}}
 
-function train(network, source::AbstractArray, dest::AbstractArray; epochs::Int64=1000, rate::Float64=0.001)::Vector
+function train(network, source::AbstractArray{Float32}, dest::AbstractArray{Float32}; epochs::Int64=1000, rate::Float64=0.001)::Vector
     optim = Flux.setup(AdamW(rate), network)
     meter = Progress(epochs, dt=0.5, showspeed=true)
     losses = []
+    GC.gc(true)
     for _ in 1:epochs
+        GC.gc(false) # stops vram from melting...
         loss, grads = Flux.withgradient(m -> mean(abs.(m(source) .- dest)), network)
         if !isfinite(loss)
             break
@@ -91,23 +93,22 @@ end
     oklab = srgb_to_oklab(rgb)
 
     device = gpu
-    dtype = f32
 
     network = Flux.Chain(
-                  Flux.Dense(4 => 4, swish),
-                  Flux.Dense(4 => 3, x -> x),
-              ) |> device |> dtype
+        Flux.Dense(4 => 4, swish),
+        Flux.Dense(4 => 3),
+    ) |> device
 
-    trim = 5
+    trim = 10
     latent_dist = latent_dist[1+trim:size(latent_dist)[1]-trim, :, :]
     colors = oklab
 
     performance = train(
         network,
-        permutedims(latent_dist, (3, 2, 1)) |> device |> dtype,
-        permutedims(colors, (2, 1)) |> device |> dtype;
+        permutedims(latent_dist, (3, 2, 1)) |> device,
+        permutedims(colors, (2, 1)) |> device;
         epochs=200_000,
-        rate=2e-3
+        rate=1e-3
     )
 
     for param in network |> cpu
